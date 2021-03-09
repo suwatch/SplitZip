@@ -1,4 +1,5 @@
 [Oo]bj/
 [Bb]in/
+*.csproj.user
 packages/*
 .vs/

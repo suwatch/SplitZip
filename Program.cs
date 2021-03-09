@@ -10,6 +10,7 @@ namespace SplitZip
         static List<string> _directories = new List<string>();
 
         static FileInfo _zipFile;
+        static DirectoryInfo _dir;
         static int _index = 0;
         static long _size = 0;
         static ZipArchive _curr = null;
@@ -20,18 +21,58 @@ namespace SplitZip
             if (args.Length == 0)
             {
                 Console.WriteLine("Usage: SplitZip.exe zipfile sizeMB");
+                Console.WriteLine("Usage: SplitZip.exe dir sizeMB");
                 return;
             }
 
             try
             {
-                _zipFile = new FileInfo(args[0]);
+                if (args[0].EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    _zipFile = new FileInfo(args[0]);
+                }
+                else
+                {
+                    _dir = new DirectoryInfo(args[0]);
+                    _zipFile = new FileInfo(Path.Combine(Directory.GetCurrentDirectory(), $"{_dir.Name}.zip"));
+                }
+
                 _maxSize = long.Parse(args[1]) * 1024 * 1024;
 
-                using (var stream = _zipFile.OpenRead())
-                using (var zipArchive = new ZipArchive(stream, ZipArchiveMode.Read))
+                if (_dir == null)
                 {
-                    zipArchive.Split();
+                    using (var stream = _zipFile.OpenRead())
+                    using (var zipArchive = new ZipArchive(stream, ZipArchiveMode.Read))
+                    {
+                        zipArchive.Split();
+                    }
+                }
+                else
+                {
+                    foreach (var info in _dir.EnumerateFileSystemInfos("*", SearchOption.AllDirectories))
+                    {
+                        var entryName = info.FullName.Substring(_dir.FullName.Length + 1).Replace('\\', '/');
+                        if (info is DirectoryInfo)
+                        {
+                            var dst = GetCurrentZipArchive(1);
+                            var result = dst.CreateEntry(entryName.Trim('/') + '/');
+                            result.LastWriteTime = info.LastWriteTime;
+                            _directories.Add(entryName.Trim('/') + '/');
+                        }
+                        else
+                        {
+                            var fileInfo = (FileInfo)info;
+                            var dst = GetCurrentZipArchive(fileInfo.Length / 3 + 1);
+                            var result = dst.CreateEntry(entryName, CompressionLevel.Fastest);
+                            result.LastWriteTime = info.LastWriteTime;
+
+                            using (var srcStream = fileInfo.OpenRead())
+                            using (var dstStream = result.Open())
+                            {
+                                srcStream.CopyTo(dstStream);
+                            }
+                        }
+                    }
                 }
 
                 if (_curr != null)
@@ -81,7 +122,7 @@ namespace SplitZip
             var fileName = $"{Path.GetFileNameWithoutExtension(_zipFile.Name)}_{_index:000}{_zipFile.Extension}";
             Console.Write($"Writing {fileName} ... ");
 
-            var fileInfo = new FileInfo(Path.Combine(_zipFile.DirectoryName, fileName));
+            var fileInfo = new FileInfo(Path.Combine(Directory.GetCurrentDirectory(), fileName));
             ++_index;
             return fileInfo.Open(FileMode.Create, FileAccess.Write);
         }
@@ -93,7 +134,8 @@ namespace SplitZip
                 if (entry.Length == 0 && (entry.FullName.EndsWith("/", StringComparison.Ordinal) || entry.FullName.EndsWith("\\", StringComparison.Ordinal)))
                 {
                     var dst = GetCurrentZipArchive(1);
-                    dst.CreateEntry(entry.FullName);
+                    var result = dst.CreateEntry(entry.FullName);
+                    result.LastWriteTime = entry.LastWriteTime;
                     _directories.Add(entry.FullName);
                 }
                 else
